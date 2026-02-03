@@ -1,34 +1,69 @@
 import speech_recognition as sr
-import whisper
 import os
 
-def listen_and_Trans():
+# CONFIGURATION
+FILENAME = "voice_input.wav"
+
+# GLOBAL VARIABLES (To remember settings between loops)
+recognizer = None
+microphone = None
+
+def init_ears():
+    """
+    Run this ONLY ONCE at the start.
+    It sets up the microphone and calculates noise level.
+    """
+    global recognizer, microphone
+    
+    print("\n[EARS] 🎤 Initializing Microphone...")
     recognizer = sr.Recognizer()
+    microphone = sr.Microphone()
+    
+    # SETTINGS
+    recognizer.pause_threshold = 0.8   # Stop recording after 0.8s of silence
+    recognizer.dynamic_energy_threshold = False # Turn OFF dynamic adjustment after calibration
+    
+    with microphone as source:
+        print("[EARS] 👂 Calibrating Noise... (Please be quiet for 1 sec)")
+        # This runs ONCE. It measures your room's silence.
+        recognizer.adjust_for_ambient_noise(source, duration=1.0)
+        
+        # We boost the threshold slightly to prevent random background noise triggers
+        # (Current noise level + 50 buffer)
+        recognizer.energy_threshold += 50
+        
+        print(f"[EARS] ✅ Calibrated! Threshold set to: {int(recognizer.energy_threshold)}")
 
-    recognizer.energy_threshold = 300
-    recognizer.pause_threshold = 2.0
+def listen():
+    """
+    Listens immediately using the saved settings.
+    No delay. No re-calibration.
+    """
+    # Safety check: Did you run init_ears()?
+    if recognizer is None:
+        print("[EARS] ❌ ERROR: You must run init_ears() first!")
+        return False
 
-    print("Loading the Brain")
-    model = whisper.load_model("base")
-    print("Model Loaded")
+    try:
+        with microphone as source:
+            print("\n[EARS] 👂 Listening... ", end="", flush=True)
+            
+            # This listens IMMEDIATELY. No waiting.
+            # timeout=5 means "If no one speaks for 5s, give up" (Prevents hanging forever)
+            try:
+                audio_data = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+            except sr.WaitTimeoutError:
+                print("(No speech detected)")
+                return False
+            
+            print("🛑 Got it.")
+            
+            # Save to WAV
+            with open(FILENAME, "wb") as f:
+                f.write(audio_data.get_wav_data())
+            
+            return True # Audio Saved
 
-    with sr.Microphone() as source:
-        print("\nListening ...")
-        audio_data = recognizer.listen(source)
-        print("Transcribing")
-
-        with open("temp.wav", "wb") as f:
-            f.write(audio_data.get_wav_data())
-
-    result = model.transcribe("temp.wav")
-    text = result["text"]
-
-    print(f"You said: {text.strip()}")
-
-    if os.path.exists("temp.wav"):
-        os.remove("temp.wav")
-
-    return text
-
-if __name__ == "__main__":
-    listen_and_Trans()
+    except Exception as e:
+        print(f"\n[EARS] ❌ Error: {e}")
+        return False
