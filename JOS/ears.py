@@ -28,6 +28,8 @@ def init_ears():
         # This runs ONCE. It measures your room's silence.
         recognizer.adjust_for_ambient_noise(source, duration=1.0)
         
+        raw_noise = recognizer.energy_threshold
+        print(f"[EARS] 📊 Ambient Noise Detected: {raw_noise:.2f}")
         # We boost the threshold slightly to prevent random background noise triggers
         # (Current noise level + 50 buffer)
         recognizer.energy_threshold += 50
