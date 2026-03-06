@@ -1,74 +1,195 @@
 import spacy
 
-print("[NLP] 🧠 Loading Language Model (en_core_web_md)...")
+print("[NLP] Loading Language Model (en_core_web_md)...")
 nlp = spacy.load("en_core_web_md")
 
-# INTENT ANCHORS
+# =============================================================================
+# STRICT KEYWORD RULES (Primary Pass)
+# These catch unambiguous commands BEFORE cosine similarity runs.
+# Each rule: list of trigger keywords -> forced intent
+# =============================================================================
+KEYWORD_RULES = [
+    # (keywords_list, forced_intent)
+    # Order matters: more specific phrases FIRST
+    (["open ", "launch ", "start ", "run "],                       "OPEN_APP"),
+    (["close ", "quit ", "terminate ", "kill "],                    "CLOSE_APP"),
+    (["create ", "make ", "build "],                               "CREATE_ITEM"),
+    (["delete ", "remove ", "erase ", "trash "],                    "DELETE_ITEM"),
+    (["move ", "transfer ", "put ", "shift ", "send ", "relocate "], "MOVE_FILE"),
+]
+
+# =============================================================================
+# VECTOR ANCHORS (Secondary Pass / Fallback)
+# Only used when strict keywords don't match.
+# Stripped of ambiguous verbs to prevent overlap.
+# =============================================================================
 INTENTS = {
-    "MOVE_FILE": nlp("move file transfer document cut paste shift put place keep organize send"),
-    "OPEN_APP": nlp("open app start program launch software run play"),
-    "CLOSE_APP": nlp("close exit stop kill terminate shut down"),
-    "SYSTEM_CONTROL": nlp("volume brightness wifi sleep mute off"),
-    "EXIT": nlp("end session stop listening bye goodbye shut down power off let's work tomorrow good night see you later")
+    "MOVE_FILE":       nlp("relocate file transfer document shift place organize send migrate destination folder"),
+    "OPEN_APP":        nlp("open launch start application program software execute"),
+    "CLOSE_APP":       nlp("close quit terminate end process kill task shut down window application"),
+    "CREATE_ITEM":     nlp("create new folder make file add document generate build directory"),
+    "DELETE_ITEM":     nlp("delete file remove folder destroy erase trash discard wipe purge"),
+    "SYSTEM_CONTROL":  nlp("volume brightness wifi sleep mute screen display sound audio power"),
+    "EXIT":            nlp("end session goodbye bye good night see you later power off shut down system"),
 }
 
+# =============================================================================
+# ACTION WORDS to strip from entity noun chunks
+# =============================================================================
+ACTION_WORDS = [
+    "open ", "close ", "launch ", "start ", "run ", "play ",
+    "stop ", "kill ", "exit ", "terminate ", "shut ", "quit ",
+    "move ", "put ", "send ", "transfer ", "shift ",
+    "increase ", "decrease ", "turn ", "set ", "change ",
+    "create ", "make ", "new ", "add ", "generate ", "build ",
+    "delete ", "remove ", "destroy ", "erase ", "trash ",
+]
+
+
+def _extract_entities(doc):
+    """
+    Shared entity extraction used by BOTH keyword and vector paths.
+    Pulls noun chunks and proper nouns, strips determiners and action verbs.
+    """
+    entities = []
+
+    for chunk in doc.noun_chunks:
+        text = chunk.text.lower().strip()
+
+        # Skip pronouns and wake word
+        if text in ["jarvis", "i", "it", "me", "he", "she", "they", "them"]:
+            continue
+
+        # Clean determiners
+        for prefix in ["the ", "a ", "an ", "my "]:
+            if text.startswith(prefix):
+                text = text[len(prefix):]
+
+        # Clean leaked action verbs
+        for action in ACTION_WORDS:
+            if text.startswith(action):
+                text = text[len(action):]
+
+        if text:
+            entities.append(text)
+
+    # Fallback for Proper Nouns (like "Google Chrome")
+    # Filter out action verbs that spaCy sometimes tags as NOUN/PROPN
+    action_stems = {
+        "open", "close", "launch", "start", "run", "play",
+        "stop", "kill", "exit", "terminate", "shut", "quit",
+        "move", "put", "send", "transfer", "shift", "relocate",
+        "create", "make", "new", "add", "generate", "build",
+        "delete", "remove", "destroy", "erase", "trash",
+    }
+    for token in doc:
+        if token.pos_ in ["PROPN", "NOUN"] and not token.is_stop:
+            word = token.text.lower()
+            if word in action_stems:
+                continue
+            if word not in " ".join(entities):
+                entities.append(word)
+
+    return entities
+
+
 def understand_command(text):
+    """
+    Hybrid intent classification:
+      Pass 1: Strict keyword matching for unambiguous commands
+      Pass 2: Cosine similarity against vector anchors for nuanced phrasing
+    Entity extraction runs on both paths via spaCy.
+    """
     doc = nlp(text.lower())
-    
-    # 1. INTENT (Clean text first)
-    clean_text = " ".join([token.text for token in doc if not token.is_stop and not token.is_punct])
+
+    # =========================================================================
+    # PASS 1: STRICT KEYWORD ROUTING
+    # Fast, deterministic, zero ambiguity for direct commands.
+    # =========================================================================
+    for keywords, forced_intent in KEYWORD_RULES:
+        for keyword in keywords:
+            if keyword in text.lower():
+                entities = _extract_entities(doc)
+                return {
+                    "intent": forced_intent,
+                    "entities": entities,
+                    "confidence": 1.0,  # Keyword match = absolute confidence
+                }
+
+    # =========================================================================
+    # PASS 2: VECTOR SIMILARITY (Fallback)
+    # For commands that don't start with a clear verb.
+    # e.g., "the budget report goes to documents" -> MOVE_FILE
+    # =========================================================================
+    clean_text = " ".join([
+        token.text for token in doc
+        if not token.is_stop and not token.is_punct
+    ])
     clean_doc = nlp(clean_text)
 
     best_intent = None
     highest_score = 0.0
-    
+
     for intent_name, anchor_doc in INTENTS.items():
         similarity = clean_doc.similarity(anchor_doc)
         if similarity > highest_score:
             highest_score = similarity
             best_intent = intent_name
 
-    # Threshold Check (0.4)
+    # Threshold Check
     if highest_score < 0.4:
         return None
 
-    # 2. ENTITY EXTRACTION (The Fix)
-    entities = []
-    
-    for chunk in doc.noun_chunks:
-        text = chunk.text.lower().strip()
-        
-        # FIX: Check EXACT word match, not substring
-        # "file" contains "i", but it is NOT equal to "i". So it survives.
-        if text in ["jarvis", "i", "it", "me", "he", "she", "they", "them"]:
-            continue
-            
-        # Clean prefixes
-        for prefix in ["the ", "a ", "an ", "my "]:
-            if text.startswith(prefix):
-                text = text[len(prefix):]
-        
-        if text: 
-            entities.append(text)
-
-    # Fallback for Proper Nouns (like "Google Chrome")
-    for token in doc:
-        if token.pos_ in ["PROPN", "NOUN"] and not token.is_stop:
-            # Add if not already captured by chunks
-            if token.text not in " ".join(entities):
-                entities.append(token.text)
+    entities = _extract_entities(doc)
 
     return {
         "intent": best_intent,
         "entities": entities,
-        "confidence": round(highest_score, 2)
+        "confidence": round(highest_score, 2),
     }
+
+
+# =============================================================================
+# SELF-TEST: Run with `python understanding.py`
+# =============================================================================
 if __name__ == "__main__":
-    # Test the bug fix immediately
-    test = "put the financial report in the backup folder"
-    print(f"Testing: '{test}'")
-    print(understand_command(test))
-    
-    test2 = "open google chrome"
-    print(f"Testing: '{test2}'")
-    print(understand_command(test2))
+    tests = [
+        # OPEN_APP (keyword match)
+        "open chrome",
+        "open google chrome",
+        "launch notepad",
+        "start calculator",
+        # CLOSE_APP (keyword match)
+        "close notepad",
+        "quit chrome",
+        "terminate excel",
+        # CREATE_ITEM (keyword match)
+        "create a new folder called reports",
+        "make a file named budget",
+        # DELETE_ITEM (keyword match)
+        "delete the test file",
+        "remove the old folder",
+        # MOVE_FILE (vector fallback — no strict keyword)
+        "put the financial report in the backup folder",
+        "transfer my resume to documents",
+        # Edge cases
+        "open",
+        "hello jarvis how are you",
+    ]
+
+    print("\n" + "=" * 60)
+    print(" HYBRID NLP SELF-TEST")
+    print("=" * 60)
+
+    for t in tests:
+        result = understand_command(t)
+        if result:
+            route = "KEYWORD" if result["confidence"] == 1.0 else "VECTOR"
+            print(f"\n  Input:    '{t}'")
+            print(f"  Route:    {route}")
+            print(f"  Intent:   {result['intent']}")
+            print(f"  Entities: {result['entities']}")
+            print(f"  Conf:     {result['confidence']}")
+        else:
+            print(f"\n  Input:    '{t}'")
+            print(f"  -> Below threshold, ignored.")

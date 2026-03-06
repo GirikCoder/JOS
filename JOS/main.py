@@ -2,6 +2,7 @@ import ears
 import brain
 import understanding
 import sys
+from hands import JarvisHands
 
 def main_system():
     # --- SETUP ---
@@ -18,7 +19,8 @@ def main_system():
     # STATE VARIABLES
     is_awake = False
     pending_action = None
-    
+    hands = JarvisHands()
+
     while True:
         # 1. LISTEN
         recorded = ears.listen()
@@ -44,13 +46,61 @@ def main_system():
             elif pending_action is not None:
                 if any(word in text for word in ["yes", "proceed", "okay", "do it","sure"]):
                     intent = pending_action['intent']
+                    entities = pending_action['entities']
+
                     if intent == "EXIT":
                         print(">>> [JARVIS]: Goodbye, Sir.")
                         sys.exit()
+
+                    elif intent == "MOVE_FILE":
+                        print(f">>> EXECUTE: MOVE_FILE")
+                        print(f"    Entities: {entities}")
+                        success, message = hands.move_file(entities)
+                        if success:
+                            print(f">>> [JARVIS]: {message}")
+                        else:
+                            print(f">>> [JARVIS]: Failed. {message}")
+
+                    elif intent == "OPEN_APP":
+                        print(f">>> EXECUTE: OPEN_APP")
+                        print(f"    Entities: {entities}")
+                        success, message = hands.open_app(entities)
+                        if success:
+                            print(f">>> [JARVIS]: {message}")
+                        else:
+                            print(f">>> [JARVIS]: Failed. {message}")
+
+                    elif intent == "CLOSE_APP":
+                        print(f">>> EXECUTE: CLOSE_APP")
+                        print(f"    Entities: {entities}")
+                        success, message = hands.close_app(entities)
+                        if success:
+                            print(f">>> [JARVIS]: {message}")
+                        else:
+                            print(f">>> [JARVIS]: Failed. {message}")
+
+                    elif intent == "CREATE_ITEM":
+                        print(f">>> EXECUTE: CREATE_ITEM")
+                        print(f"    Entities: {entities}")
+                        success, message = hands.create_item(entities)
+                        if success:
+                            print(f">>> [JARVIS]: {message}")
+                        else:
+                            print(f">>> [JARVIS]: Failed. {message}")
+
+                    elif intent == "DELETE_ITEM":
+                        print(f">>> EXECUTE: DELETE_ITEM")
+                        print(f"    Entities: {entities}")
+                        success, message = hands.delete_item(entities)
+                        if success:
+                            print(f">>> [JARVIS]: {message}")
+                        else:
+                            print(f">>> [JARVIS]: Failed. {message}")
+
                     else:
-                        print(f">>> ⚡ EXECUTE: {intent}")
-                        print(f"    Target: {pending_action['entities']}")
-                        print(">>> [JARVIS]: Task complete.")
+                        # Placeholder for SYSTEM_CONTROL
+                        print(f">>> [JARVIS]: I know the intent is {intent}, but I can't execute it yet.")
+
                     pending_action = None
                     
                 elif any(word in text for word in ["no", "cancel", "stop", "abort","wait","don't"]):
@@ -88,7 +138,7 @@ def main_system():
                     print(f"    (Debug: Intent={intent}, Conf={confidence})")
 
                     # DANGEROUS COMMANDS -> REQUIRE CONFIRMATION
-                    if intent in ["MOVE_FILE", "OPEN_APP", "CLOSE_APP", "SYSTEM_CONTROL", "EXIT"]:
+                    if intent in ["MOVE_FILE", "OPEN_APP", "CLOSE_APP", "CREATE_ITEM", "DELETE_ITEM", "SYSTEM_CONTROL", "EXIT"]:
                         if intent == "EXIT":
                             print(">>> [JARVIS]: Do you want to shut down the system?")
                         else:

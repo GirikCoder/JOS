@@ -57,8 +57,7 @@ def transcribe():
     # 2. Remove Punctuation ("jarvis?" -> "jarvis")
     # This removes ., ?, !, etc.
     text = text.translate(str.maketrans('', '', string.punctuation))
-    
-    # --- HALLUCINATIONS ---
+   
     hallucinations = [
         "thank you", "thanks for watching", "subscribe", 
         "copyright", "amara", "sightseeing", "you", "silence"

@@ -1,8 +1,7 @@
 import understanding
 import time
 
-# These are the commands that FAILED in your previous log
-# We want to see them pass now.
+
 TEST_CASES = [
     "put the financial report in the backup folder",   # Failed because of 'i' in financial
     "send the file to d drive",                        # Failed because of 'i' in file/drive
