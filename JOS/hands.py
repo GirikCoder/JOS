@@ -3,6 +3,9 @@ import subprocess
 import shutil
 import logging
 from pathlib import Path
+import screen_brightness_control as sbc
+from pycaw.pycaw import AudioUtilities
+from app_resolver import DynamicAppResolver
 
 # Setup basic logging to address the "No logging" issue in your known bugs
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -22,76 +25,8 @@ class JarvisHands:
             }
 
             # App Dictionary: maps spoken names to Windows executable names
-            self.app_dictionary = {
-            # --- System & Utilities ---
-            "notepad": "notepad.exe",
-            "calculator": "calc.exe",
-            "calc": "calc.exe",
-            "explorer": "explorer.exe",
-            "file explorer": "explorer.exe",
-            "cmd": "cmd.exe",
-            "command prompt": "cmd.exe",
-            "terminal": "wt.exe",
-            "powershell": "powershell.exe",
-            "task manager": "Taskmgr.exe",
-            "settings": "ms-settings:",
-            "control panel": "control.exe",
-            "snipping tool": "SnippingTool.exe",
-            "registry editor": "regedit.exe",
-            "device manager": "devmgmt.msc",
-            "services": "services.msc",
-
-            # --- Browsers ---
-            "chrome": "chrome.exe",
-            "google chrome": "chrome.exe",
-            "edge": "msedge.exe",
-            "microsoft edge": "msedge.exe",
-            "browser": "msedge.exe",
-            "firefox": "firefox.exe",
-            "mozilla": "firefox.exe",
-            "brave": "brave.exe",
-            "opera": "opera.exe",
-
-            # --- Office & Productivity ---
-            "word": "WINWORD.EXE",
-            "excel": "EXCEL.EXE",
-            "powerpoint": "POWERPNT.EXE",
-            "outlook": "OUTLOOK.EXE",
-            "onenote": "ONENOTE.EXE", # Or "onenote:" for the Windows 10 app
-            "paint": "mspaint.exe",
-            "notepad plus plus": "notepad++.exe",
-            "adobe acrobat": "Acrobat.exe",
-            "adobe reader": "AcroRd32.exe",
-
-            # --- Communication & Social ---
-            "discord": "Discord.exe",
-            "teams": "ms-teams.exe",
-            "microsoft teams": "ms-teams.exe",
-            "zoom": "Zoom.exe",
-            "whatsapp": "whatsapp:", # Using the Windows URI protocol for reliability
-            "slack": "slack.exe",
-            "telegram": "Telegram.exe",
-            "skype": "skype.exe",
-
-            # --- Media & Entertainment ---
-            "spotify": "Spotify.exe",
-            "vlc": "vlc.exe",
-            "media player": "vlc.exe",
-            "itunes": "iTunes.exe",
-            "obs": "obs64.exe",
-            "camera": "microsoft.windows.camera:",
-
-            # --- Development & Gaming ---
-            "code": "code.exe",
-            "vs code": "code.exe",
-            "visual studio code": "code.exe",
-            "visual studio": "devenv.exe", # The full heavy Visual Studio IDE
-            "postman": "Postman.exe",
-            "git bash": "git-bash.exe",
-            "steam": "steam.exe",
-            "epic games": "EpicGamesLauncher.exe",
-            "xbox": "xbox:"
-        }
+            resolver = DynamicAppResolver()
+            self.app_dictionary = resolver.build_app_map()
 
             # Close overrides: some apps (UWP/modern) have different process
             # names than what launches them. This maps the OPEN exe to the
@@ -263,14 +198,11 @@ class JarvisHands:
             return False, f"I don't know how to open '{spoken_name}'. It's not in my app dictionary."
 
         try:
-            # Use os.startfile for EVERYTHING.
-            # It inherently supports URI protocols (ms-settings:), .msc files,
-            # and it natively checks the Windows App Paths registry so things like
-            # 'msedge.exe' and 'chrome.exe' work without needing full paths.
+            # We execute the absolute path directly as scraped by the resolver
             os.startfile(exe_name)
 
             logging.info(f"Opened {spoken_name} ({exe_name})")
-            return True, f"Opening {spoken_name} for you."
+            return True, f"{spoken_name.capitalize()} opened."
 
         except FileNotFoundError:
             logging.error(f"{exe_name} not found on this system.")
@@ -297,8 +229,11 @@ class JarvisHands:
             logging.warning(f"App '{spoken_name}' not found in app dictionary.")
             return False, f"I don't know how to close '{spoken_name}'. It's not in my app dictionary."
 
+        # The dictionary values are now absolute paths, extract just the process name for overrides and taskkill.
+        exe_basename = os.path.basename(exe_name)
+        
         # Check if this exe has a different close process name (UWP apps)
-        close_exe = self.close_overrides.get(exe_name, exe_name)
+        close_exe = self.close_overrides.get(exe_basename, exe_basename)
 
         # SAFETY CHECK: Block blacklisted processes
         if close_exe.lower() in CLOSE_BLACKLIST:
@@ -319,7 +254,7 @@ class JarvisHands:
 
             if result.returncode == 0:
                 logging.info(f"Closed {spoken_name} ({close_exe})")
-                return True, f"Closed {spoken_name} for you."
+                return True, f"{spoken_name.capitalize()} closed."
             else:
                 logging.warning(f"taskkill returned {result.returncode}: {result.stderr.strip()}")
                 return False, f"{spoken_name} doesn't seem to be running right now."
@@ -431,3 +366,111 @@ class JarvisHands:
         except Exception as e:
             logging.error(f"Error deleting item: {e}")
             return False, "An unexpected error occurred while deleting the item."
+
+    def open_item(self, entities):
+        """
+        Opens a specific file or folder natively using Safe Zones logic.
+        Returns (success_boolean, message_string).
+        """
+        if not entities:
+            return False, "I didn't catch the name of the file or folder to open."
+
+        # Extract the requested item name from the entities list
+        # Strip common words like 'file' or 'folder' that might be left in entities
+        spoken_name = " ".join([str(e) for e in entities]).lower().strip()
+        type_words = {"folder", "directory", "dir", "file", "document", "doc"}
+        name_parts = spoken_name.split()
+        cleaned_parts = [w for w in name_parts if w not in type_words]
+        item_name = " ".join(cleaned_parts).strip()
+        
+        if not item_name:
+            item_name = spoken_name
+
+        # Call our existing _find_item_in_safe_zones(item_name) helper method.
+        # It handles both files and folders.
+        found_path = self._find_item_in_safe_zones(item_name)
+        if not found_path:
+            return False, f"I could not find a file or folder matching '{item_name}' in your safe zones."
+
+        try:
+            # If the item is found, use os.startfile(found_path)
+            os.startfile(str(found_path))
+            logging.info(f"Opened item natively: {found_path}")
+            return True, f"Opened {found_path.name}."
+        except Exception as e:
+            logging.error(f"Error opening item {found_path}: {e}")
+            return False, "An unexpected error occurred while trying to open the item."
+
+    def system_control(self, entities):
+        """
+        Controls system hardware (volume and brightness) using pycaw and screen-brightness-control.
+        Returns (success_boolean, message_string).
+        """
+        if not entities:
+            return False, "I didn't catch the system control action."
+
+        # Parse target from entities
+        is_volume = any(w in entities for w in ["volume", "sound", "mute", "unmute"])
+        is_brightness = any(w in entities for w in ["brightness", "screen", "dim"])
+
+        # Extract level (if a number is present)
+        level = None
+        for e in entities:
+            if isinstance(e, int) or (isinstance(e, str) and str(e).isdigit()):
+                level = int(e)
+                break
+
+        try:
+            if is_volume:
+                # Initialize pycaw
+                devices = AudioUtilities.GetSpeakers()
+                volume = devices.EndpointVolume
+
+                if "mute" in entities:
+                    volume.SetMute(1, None)
+                    return True, "System volume muted."
+                elif "unmute" in entities:
+                    volume.SetMute(0, None)
+                    return True, "System volume unmuted."
+                elif level is not None:
+                    # Enforce bounds 0-100 and convert to scalar (0.0 to 1.0) for pycaw
+                    vol_float = max(0.0, min(100.0, float(level))) / 100.0
+                    volume.SetMasterVolumeLevelScalar(vol_float, None)
+                    return True, f"System volume set to {level}%."
+                elif "up" in entities or "increase" in entities:
+                    current = volume.GetMasterVolumeLevelScalar()
+                    new_vol = min(1.0, current + 0.2)
+                    volume.SetMasterVolumeLevelScalar(new_vol, None)
+                    return True, "Volume increased."
+                elif "down" in entities or "decrease" in entities or "reduce" in entities or "lower" in entities:
+                    current = volume.GetMasterVolumeLevelScalar()
+                    new_vol = max(0.0, current - 0.2)
+                    volume.SetMasterVolumeLevelScalar(new_vol, None)
+                    return True, "Volume decreased."
+                else:
+                    return False, "I didn't understand how you want to change the volume."
+
+            elif is_brightness:
+                # sbc.get_brightness() returns a list of values for multiple monitors. Take the primary (0).
+                current_brightness = sbc.get_brightness(display=0)[0]
+                
+                if level is not None:
+                    sbc.set_brightness(level)
+                    return True, f"Screen brightness set to {level}%."
+                elif "dim" in entities or "decrease" in entities or "down" in entities or "reduce" in entities or "lower" in entities:
+                    new_b = max(0, current_brightness - 20)
+                    sbc.set_brightness(new_b)
+                    return True, f"Screen dimmed to {new_b}%."
+                elif "increase" in entities or "up" in entities:
+                    new_b = min(100, current_brightness + 20)
+                    sbc.set_brightness(new_b)
+                    return True, f"Screen brightness increased to {new_b}%."
+                else:
+                    return False, "I didn't understand how you want to change the brightness."
+
+            else:
+                return False, "I didn't understand which system setting to control."
+
+        except Exception as e:
+            logging.error(f"Error during SYSTEM_CONTROL hardware execution: {e}")
+            return False, "Hardware system control failed."

@@ -11,11 +11,13 @@ nlp = spacy.load("en_core_web_md")
 KEYWORD_RULES = [
     # (keywords_list, forced_intent)
     # Order matters: more specific phrases FIRST
+    (["open file", "open folder", "open document", "find folder", "folder named", "file named", "document named", "folder called", "file called", "document called"], "OPEN_ITEM"),
     (["open ", "launch ", "start ", "run "],                       "OPEN_APP"),
     (["close ", "quit ", "terminate ", "kill "],                    "CLOSE_APP"),
     (["create ", "make ", "build "],                               "CREATE_ITEM"),
     (["delete ", "remove ", "erase ", "trash "],                    "DELETE_ITEM"),
     (["move ", "transfer ", "put ", "shift ", "send ", "relocate "], "MOVE_FILE"),
+    (["volume", "mute", "unmute", "sound", "brightness", "dim", "screen"], "SYSTEM_CONTROL"),
 ]
 
 # =============================================================================
@@ -29,6 +31,7 @@ INTENTS = {
     "CLOSE_APP":       nlp("close quit terminate end process kill task shut down window application"),
     "CREATE_ITEM":     nlp("create new folder make file add document generate build directory"),
     "DELETE_ITEM":     nlp("delete file remove folder destroy erase trash discard wipe purge"),
+    "OPEN_ITEM":       nlp("open file find folder show document read text locate directory"),
     "SYSTEM_CONTROL":  nlp("volume brightness wifi sleep mute screen display sound audio power"),
     "EXIT":            nlp("end session goodbye bye good night see you later power off shut down system"),
 }
@@ -42,7 +45,8 @@ ACTION_WORDS = [
     "move ", "put ", "send ", "transfer ", "shift ",
     "increase ", "decrease ", "turn ", "set ", "change ",
     "create ", "make ", "new ", "add ", "generate ", "build ",
-    "delete ", "remove ", "destroy ", "erase ", "trash ",
+    "delete ", "remove ", "destroy ", "erase ", "trash ", "find ",
+    "folder ", "file ", "document ", "named ", "called "
 ]
 
 
@@ -60,15 +64,17 @@ def _extract_entities(doc):
         if text in ["jarvis", "i", "it", "me", "he", "she", "they", "them"]:
             continue
 
-        # Clean determiners
-        for prefix in ["the ", "a ", "an ", "my "]:
-            if text.startswith(prefix):
-                text = text[len(prefix):]
-
-        # Clean leaked action verbs
-        for action in ACTION_WORDS:
-            if text.startswith(action):
-                text = text[len(action):]
+        # Clean determiners and leak words iteratively to handle nesting (e.g. "open the folder named")
+        changed = True
+        while changed:
+            changed = False
+            for prefix in ["the ", "a ", "an ", "my "] + ACTION_WORDS:
+                if text.startswith(prefix):
+                    text = text[len(prefix):].strip()
+                    changed = True
+                elif text == prefix.strip():
+                    text = ""
+                    changed = True
 
         if text:
             entities.append(text)
@@ -80,15 +86,28 @@ def _extract_entities(doc):
         "stop", "kill", "exit", "terminate", "shut", "quit",
         "move", "put", "send", "transfer", "shift", "relocate",
         "create", "make", "new", "add", "generate", "build",
-        "delete", "remove", "destroy", "erase", "trash",
+        "delete", "remove", "destroy", "erase", "trash", "find",
+        "folder", "file", "document", "named", "called"
     }
     for token in doc:
         if token.pos_ in ["PROPN", "NOUN"] and not token.is_stop:
             word = token.text.lower()
             if word in action_stems:
                 continue
-            if word not in " ".join(entities):
+            if word not in " ".join(str(e) for e in entities):
                 entities.append(word)
+
+    # Extract numerical digits for hardware levels
+    for token in doc:
+        if token.like_num or token.pos_ == "NUM":
+            if token.text.isdigit():
+                num = int(token.text)
+                if num not in entities:
+                    entities.append(num)
+            else:
+                word = token.text.lower()
+                if word not in " ".join(str(e) for e in entities):
+                    entities.append(word)
 
     return entities
 
@@ -110,6 +129,14 @@ def understand_command(text):
         for keyword in keywords:
             if keyword in text.lower():
                 entities = _extract_entities(doc)
+                
+                # If SYSTEM_CONTROL, ensure key action words aren't filtered out
+                if forced_intent == "SYSTEM_CONTROL":
+                    sys_words = ["volume", "mute", "unmute", "sound", "brightness", "dim", "screen", "up", "down", "increase", "decrease", "reduce", "lower"]
+                    for sw in sys_words:
+                        if sw in text.lower() and sw not in entities:
+                            entities.append(sw)
+                            
                 return {
                     "intent": forced_intent,
                     "entities": entities,
@@ -169,6 +196,11 @@ if __name__ == "__main__":
         # DELETE_ITEM (keyword match)
         "delete the test file",
         "remove the old folder",
+        # SYSTEM_CONTROL (keyword match)
+        "set volume to 50",
+        "mute the sound",
+        "increase screen brightness by 20",
+        "dim the screen",
         # MOVE_FILE (vector fallback — no strict keyword)
         "put the financial report in the backup folder",
         "transfer my resume to documents",

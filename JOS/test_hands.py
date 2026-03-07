@@ -1,7 +1,4 @@
-"""
-Test script for CREATE_ITEM and DELETE_ITEM — no mic/voice needed.
-Creates a folder and a file, pauses for verification, then deletes both.
-"""
+
 import time
 from hands import JarvisHands
 
