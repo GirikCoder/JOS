@@ -11,7 +11,9 @@ nlp = spacy.load("en_core_web_md")
 KEYWORD_RULES = [
     # (keywords_list, forced_intent)
     # Order matters: more specific phrases FIRST
+    (["who is", "what is", "tell me about", "summarize"], "ASK_QUESTION"),
     (["open file", "open folder", "open document", "find folder", "folder named", "file named", "document named", "folder called", "file called", "document called"], "OPEN_ITEM"),
+    (["search google for", "search youtube for", "google", "look up", "search the web for", "find a video of", "search for"], "WEB_SEARCH"),
     (["open ", "launch ", "start ", "run "],                       "OPEN_APP"),
     (["close ", "quit ", "terminate ", "kill "],                    "CLOSE_APP"),
     (["create ", "make ", "build "],                               "CREATE_ITEM"),
@@ -32,6 +34,8 @@ INTENTS = {
     "CREATE_ITEM":     nlp("create new folder make file add document generate build directory"),
     "DELETE_ITEM":     nlp("delete file remove folder destroy erase trash discard wipe purge"),
     "OPEN_ITEM":       nlp("open file find folder show document read text locate directory"),
+    "ASK_QUESTION":    nlp("who what summarize tell explain know question facts info"),
+    "WEB_SEARCH":      nlp("search google youtube look up find video web internet browser query"),
     "SYSTEM_CONTROL":  nlp("volume brightness wifi sleep mute screen display sound audio power"),
     "EXIT":            nlp("end session goodbye bye good night see you later power off shut down system"),
 }
@@ -46,7 +50,9 @@ ACTION_WORDS = [
     "increase ", "decrease ", "turn ", "set ", "change ",
     "create ", "make ", "new ", "add ", "generate ", "build ",
     "delete ", "remove ", "destroy ", "erase ", "trash ", "find ",
-    "folder ", "file ", "document ", "named ", "called "
+    "folder ", "file ", "document ", "named ", "called ",
+    "search ", "google ", "youtube ", "look ", "up ",
+    "who ", "what ", "tell ", "me ", "about ", "summarize ", "is "
 ]
 
 
@@ -87,7 +93,9 @@ def _extract_entities(doc):
         "move", "put", "send", "transfer", "shift", "relocate",
         "create", "make", "new", "add", "generate", "build",
         "delete", "remove", "destroy", "erase", "trash", "find",
-        "folder", "file", "document", "named", "called"
+        "folder", "file", "document", "named", "called",
+        "search", "google", "youtube", "look", "up",
+        "who", "what", "tell", "me", "about", "summarize", "is"
     }
     for token in doc:
         if token.pos_ in ["PROPN", "NOUN"] and not token.is_stop:
@@ -137,10 +145,32 @@ def understand_command(text):
                         if sw in text.lower() and sw not in entities:
                             entities.append(sw)
                             
+                # If WEB_SEARCH, slice the original text to extract the full query
+                if forced_intent == "WEB_SEARCH":
+                    query_text = text.lower()
+                    for t in ["search google for", "search youtube for", "search the web for", "find a video of", "search for", "google", "look up"]:
+                        if t in query_text:
+                            query_text = query_text.split(t)[-1].strip()
+                            break
+                    if query_text:
+                        entities = [query_text]
+
+                # If ASK_QUESTION, slice the original text to extract the full subject
+                if forced_intent == "ASK_QUESTION":
+                    query_text = text.lower()
+                    for t in ["who is", "what is", "tell me about", "summarize"]:
+                        if t in query_text:
+                            # E.g. "who is nikola tesla" -> split("who is")[-1] yields " nikola tesla"
+                            query_text = query_text.split(t)[-1].strip()
+                            break
+                    if query_text:
+                        entities = [query_text]
+
                 return {
                     "intent": forced_intent,
                     "entities": entities,
                     "confidence": 1.0,  # Keyword match = absolute confidence
+                    "original_text": text
                 }
 
     # =========================================================================
@@ -168,11 +198,30 @@ def understand_command(text):
         return None
 
     entities = _extract_entities(doc)
+    
+    if best_intent == "WEB_SEARCH":
+        query_text = text.lower()
+        for t in ["search google for", "search youtube for", "search the web for", "find a video of", "search for", "google", "look up"]:
+            if t in query_text:
+                query_text = query_text.split(t)[-1].strip()
+                break
+        if query_text:
+            entities = [query_text]
+
+    if best_intent == "ASK_QUESTION":
+        query_text = text.lower()
+        for t in ["who is", "what is", "tell me about", "summarize"]:
+            if t in query_text:
+                query_text = query_text.split(t)[-1].strip()
+                break
+        if query_text:
+            entities = [query_text]
 
     return {
         "intent": best_intent,
         "entities": entities,
         "confidence": round(highest_score, 2),
+        "original_text": text
     }
 
 
@@ -204,6 +253,14 @@ if __name__ == "__main__":
         # MOVE_FILE (vector fallback — no strict keyword)
         "put the financial report in the backup folder",
         "transfer my resume to documents",
+        # OPEN_ITEM
+        "open the folder named gggg",
+        # WEB_SEARCH
+        "search youtube for python tutorials",
+        "look up the weather in tokyo",
+        # ASK_QUESTION
+        "who is nikola tesla",
+        "tell me about the roman empire",
         # Edge cases
         "open",
         "hello jarvis how are you",

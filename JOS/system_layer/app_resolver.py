@@ -41,14 +41,13 @@ class DynamicAppResolver:
         for directory in directories_to_scan:
             if not os.path.exists(directory):
                 continue
-                
             # Recursively find all .lnk files
             search_pattern = os.path.join(directory, "**", "*.lnk")
             for lnk_path in glob.glob(search_pattern, recursive=True):
                 try:
                     shortcut = shell.CreateShortCut(lnk_path)
                     target_path = shortcut.Targetpath
-                    
+              
                     if target_path and target_path.lower().endswith('.exe'):
                         # Clean the filename for the key e.g "Google Chrome.lnk" -> "google chrome"
                         clean_name = os.path.basename(lnk_path).replace(".lnk", "").strip().lower()

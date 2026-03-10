@@ -56,6 +56,7 @@ print("[TEST 5] Delete 'jarvis_test_file'")
 print("=" * 50)
 success5, message5 = hands.delete_item(["jarvis_test_file"])
 print(f"  Success: {success5}")
+
 print(f"  Message: {message5}")
 
 # --- TEST 6: Delete something that doesn't exist (should fail) ---

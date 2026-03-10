@@ -11,7 +11,6 @@ class JarvisMouth:
 
     def _speech_worker(self):
         """Background thread that continuously processes speech requests."""
-        # pyttsx3 MUST be initialized in the same thread that runs it
         self.engine = pyttsx3.init()
         self.engine.setProperty('rate', 185)
         self.engine.setProperty('volume', 1.0)

@@ -2,10 +2,13 @@ import os
 import subprocess
 import shutil
 import logging
+import webbrowser
+import urllib.parse
+import wikipedia
 from pathlib import Path
 import screen_brightness_control as sbc
 from pycaw.pycaw import AudioUtilities
-from app_resolver import DynamicAppResolver
+from system_layer.app_resolver import DynamicAppResolver
 
 # Setup basic logging to address the "No logging" issue in your known bugs
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -400,6 +403,67 @@ class JarvisHands:
         except Exception as e:
             logging.error(f"Error opening item {found_path}: {e}")
             return False, "An unexpected error occurred while trying to open the item."
+
+    def web_search(self, entities, original_text):
+        """
+        Performs a web search using the default browser natively.
+        Automatically routes 'youtube' or 'video' queries to YT, else Google.
+        Returns (success_boolean, message_string).
+        """
+        if not entities:
+            return False, "I didn't catch what you wanted to search for."
+            
+        query = " ".join([str(e) for e in entities]).strip()
+        if not query:
+            return False, "The search query was empty."
+            
+        encoded_query = urllib.parse.quote_plus(query)
+        ot_lower = original_text.lower()
+        
+        is_youtube = "youtube" in ot_lower or "video" in ot_lower
+        
+        try:
+            if is_youtube:
+                url = f"https://www.youtube.com/results?search_query={encoded_query}"
+                webbrowser.open(url)
+                logging.info(f"Opened YouTube search for: {query}")
+                return True, f"Searching YouTube for {query}."
+            else:
+                url = f"https://www.google.com/search?q={encoded_query}"
+                webbrowser.open(url)
+                logging.info(f"Opened Google search for: {query}")
+                return True, f"Searching Google for {query}."
+        except Exception as e:
+            logging.error(f"Error performing web search: {e}")
+            return False, "An unexpected error occurred while trying to search the web."
+
+    def ask_wikipedia(self, entities):
+        """
+        Fetches a 2-sentence summary of a topic from Wikipedia.
+        Handles disambiguation and missing pages safely so TTS won't crash.
+        Returns (success_boolean, message_string).
+        """
+        if not entities:
+            return False, "I didn't catch the topic you want me to look up."
+            
+        query = " ".join([str(e) for e in entities]).strip()
+        if not query:
+            return False, "The query for Wikipedia was empty."
+            
+        try:
+            logging.info(f"Querying Wikipedia for: {query}")
+            summary = wikipedia.summary(query, sentences=2, auto_suggest=True)
+            return True, summary
+        except wikipedia.exceptions.DisambiguationError as e:
+            options = ", ".join(e.options[:3])
+            logging.warning(f"Wikipedia DisambiguationError for '{query}': {e.options}")
+            return False, f"'{query}' is too broad. Did you mean {options}, or something else?"
+        except wikipedia.exceptions.PageError:
+            logging.warning(f"Wikipedia PageError: No records found for '{query}'")
+            return False, f"I couldn't find any Wikipedia records matching '{query}'."
+        except Exception as e:
+            logging.error(f"Unexpected error querying Wikipedia: {e}")
+            return False, "I encountered an error while communicating with the Wikipedia database."
 
     def system_control(self, entities):
         """

@@ -1,9 +1,9 @@
-import ears
-import brain
-import understanding
+from ai_layer import ears
+from ai_layer import brain
+from ai_layer import understanding
 import sys
-from hands import JarvisHands
-from mouth import JarvisMouth
+from system_layer.hands import JarvisHands
+from ai_layer.mouth import JarvisMouth
 
 def main_system():
     # --- SETUP ---
@@ -49,6 +49,7 @@ def main_system():
                 if any(word in text for word in ["yes", "proceed", "okay", "do it","sure"]):
                     intent = pending_action['intent']
                     entities = pending_action['entities']
+                    original_text = pending_action.get('original_text', '')
 
                     if intent == "EXIT":
                         mouth.speak("Goodbye, Sir.")
@@ -63,6 +64,24 @@ def main_system():
                             mouth.speak(message)
                         else:
                             mouth.speak(f"Failed. {message}")
+                            
+                    elif intent == "WEB_SEARCH":
+                        print(f">>> EXECUTE: WEB_SEARCH")
+                        print(f"    Entities: {entities}")
+                        success, msg = hands.web_search(entities, original_text)
+                        if success:
+                            mouth.speak(msg)
+                        else:
+                            mouth.speak(f"Failed. {msg}")
+                            
+                    elif intent == "ASK_QUESTION":
+                        print(f">>> EXECUTE: ASK_QUESTION")
+                        print(f"    Entities: {entities}")
+                        success, msg = hands.ask_wikipedia(entities)
+                        if success:
+                            mouth.speak(msg)
+                        else:
+                            mouth.speak(f"Failed. {msg}")
 
                     elif intent == "OPEN_APP":
                         print(f">>> EXECUTE: OPEN_APP")
@@ -161,7 +180,7 @@ def main_system():
                     print(f"    (Debug: Intent={intent}, Conf={confidence})")
 
                     # DANGEROUS COMMANDS -> REQUIRE CONFIRMATION
-                    if intent in ["MOVE_FILE", "OPEN_APP", "CLOSE_APP", "CREATE_ITEM", "DELETE_ITEM", "SYSTEM_CONTROL", "EXIT", "OPEN_ITEM"]:
+                    if intent in ["MOVE_FILE", "OPEN_APP", "CLOSE_APP", "CREATE_ITEM", "DELETE_ITEM", "SYSTEM_CONTROL", "EXIT", "OPEN_ITEM", "WEB_SEARCH", "ASK_QUESTION"]:
                         if intent == "EXIT":
                             mouth.speak("Do you want to shut down the system?")
                         elif intent == "SYSTEM_CONTROL":
@@ -204,6 +223,19 @@ def main_system():
                                 mouth.speak(f"Do you want to move {entities[0]}?")
                             else:
                                 mouth.speak("Do you want to move the file?")
+                        elif intent == "WEB_SEARCH":
+                            query = " ".join([str(e) for e in entities])
+                            ot_lower = text.lower()
+                            if "youtube" in ot_lower or "video" in ot_lower:
+                                mouth.speak(f"Do you want to search YouTube for {query}?")
+                            else:
+                                mouth.speak(f"Do you want to search Google for {query}?")
+                        elif intent == "ASK_QUESTION":
+                            topic = " ".join([str(e) for e in entities])
+                            if topic:
+                                mouth.speak(f"Do you want me to look up {topic}?")
+                            else:
+                                mouth.speak("Do you want me to look that up?")
                         else:
                             mouth.speak(f"You want to {intent}. Correct?")
                         pending_action = analysis 
