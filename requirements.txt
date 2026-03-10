@@ -1,0 +1,16 @@
+# Audio & Speech
+openai-whisper
+SpeechRecognition
+pyttsx3
+PyAudio
+openwakeword
+
+# NLP
+spacy
+
+# Windows System Controls
+pycaw
+comtypes
+screen-brightness-control
+pywin32
+wikipedia
